@@ -45,6 +45,8 @@ class ParentAgent:
         try:
             response = self.model.generate_content(prompt)
             llm_output = response.text
+            with open("parent.log", "a") as f:
+                f.write(f"DEBUG: LLM Output:\n{llm_output}\n")
             
             # Simple parsing of LLM output
             location = None
@@ -56,12 +58,17 @@ class ParentAgent:
                 elif line.startswith("Intent:"):
                     intent = line.split(":", 1)[1].strip()
             
+            with open("parent.log", "a") as f:
+                f.write(f"DEBUG: Parsed Location: '{location}', Intent: '{intent}'\n")
+
             if not location or location == "None":
                 return "I couldn't identify the location you want to visit. Please specify a city."
 
             # 2. Get Coordinates
             coords = get_coordinates(location)
             if not coords:
+                with open("parent.log", "a") as f:
+                    f.write(f"DEBUG: get_coordinates failed for '{location}'\n")
                 return f"I couldn't find the location '{location}'. Please check the spelling or try a major city."
             
             lat, lon, osm_id, osm_type = coords
