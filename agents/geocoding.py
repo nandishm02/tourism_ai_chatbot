@@ -9,7 +9,7 @@ def get_coordinates(place_name: str) -> Optional[Tuple[float, float, Optional[in
     url = "https://photon.komoot.io/api/"
     params = {
         "q": place_name,
-        "limit": 5, 
+        "limit": 5,  # Fetch multiple results to filter
         "osm_tag": ["place:city", "boundary:administrative"]
     }
     
@@ -19,9 +19,16 @@ def get_coordinates(place_name: str) -> Optional[Tuple[float, float, Optional[in
         data = response.json()
         
         if "features" in data and data["features"]:
+            # Prioritize results by:
+            # 1. Higher admin_level (lower number = more important)
+            # 2. Population (if available)
+            # 3. Type: relation > way > node
+            
             def score_feature(feature):
                 props = feature["properties"]
                 score = 0
+                
+                # HEAVILY prioritize India and other major countries
                 country_code = props.get("countrycode", "").upper()
                 if country_code == "IN":  # India
                     score += 10000
@@ -29,15 +36,20 @@ def get_coordinates(place_name: str) -> Optional[Tuple[float, float, Optional[in
                     score += 5000
                 elif country_code in ["AU", "NZ"]:  # Deprioritize Australia/NZ for Indian city names
                     score -= 5000
+                
+                # Prefer relations over ways over nodes
                 type_map = {'R': 300, 'W': 200, 'N': 100}
                 score += type_map.get(props.get("osm_type"), 0)
+                
+                # Prefer lower admin_level (e.g., 4 for state, 6 for city)
                 admin_level = props.get("admin_level")
                 if admin_level:
                     try:
-                        score += (20 - int(admin_level)) * 10  
+                        score += (20 - int(admin_level)) * 10  # Lower admin_level = higher score
                     except:
                         pass
-
+                
+                # Prefer higher population
                 population = props.get("population")
                 if population:
                     try:
