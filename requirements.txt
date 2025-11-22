@@ -3,3 +3,4 @@ requests
 google-generativeai
 python-dotenv
 gunicorn
+spacy>=3.7.0
