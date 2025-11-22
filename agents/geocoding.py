@@ -9,7 +9,7 @@ def get_coordinates(place_name: str) -> Optional[Tuple[float, float, Optional[in
     url = "https://photon.komoot.io/api/"
     params = {
         "q": place_name,
-        "limit": 1,
+        "limit": 5, 
         "osm_tag": ["place:city", "boundary:administrative"]
     }
     
@@ -19,7 +19,38 @@ def get_coordinates(place_name: str) -> Optional[Tuple[float, float, Optional[in
         data = response.json()
         
         if "features" in data and data["features"]:
-            feature = data["features"][0]
+            def score_feature(feature):
+                props = feature["properties"]
+                score = 0
+                country_code = props.get("countrycode", "").upper()
+                if country_code == "IN":  # India
+                    score += 10000
+                elif country_code in ["US", "GB", "CN", "BR", "DE", "FR", "JP"]:  # Major countries
+                    score += 5000
+                elif country_code in ["AU", "NZ"]:  # Deprioritize Australia/NZ for Indian city names
+                    score -= 5000
+                type_map = {'R': 300, 'W': 200, 'N': 100}
+                score += type_map.get(props.get("osm_type"), 0)
+                admin_level = props.get("admin_level")
+                if admin_level:
+                    try:
+                        score += (20 - int(admin_level)) * 10  
+                    except:
+                        pass
+
+                population = props.get("population")
+                if population:
+                    try:
+                        score += min(int(population) / 10000, 100)  # Cap at 100
+                    except:
+                        pass
+                
+                return score
+            
+            # Sort features by score
+            sorted_features = sorted(data["features"], key=score_feature, reverse=True)
+            feature = sorted_features[0]
+            
             props = feature["properties"]
             coords = feature["geometry"]["coordinates"]
             
