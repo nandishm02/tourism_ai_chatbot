@@ -5,10 +5,9 @@ class NLPParser:
     def __init__(self):
         """Initialize spaCy NLP model."""
         try:
-            # Try to load the model
             self.nlp = spacy.load("en_core_web_sm")
         except OSError:
-            # Model not installed, provide helpful error
+           
             print("ERROR: spaCy model 'en_core_web_sm' not found.")
             print("Please install it by running:")
             print("  python -m spacy download en_core_web_sm")
@@ -116,5 +115,5 @@ class NLPParser:
         elif has_places:
             return "Places"
         else:
-            # Default to Places if no specific keywords found
             return "Places"
+
