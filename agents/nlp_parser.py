@@ -1,17 +1,38 @@
-import spacy
+import re
 from typing import Tuple, Optional
 
 class NLPParser:
     def __init__(self):
-        """Initialize spaCy NLP model."""
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-        except OSError:
-           
-            print("ERROR: spaCy model 'en_core_web_sm' not found.")
-            print("Please install it by running:")
-            print("  python -m spacy download en_core_web_sm")
-            self.nlp = None
+        """Initialize the lightweight regex-based parser."""
+        # Common location indicators
+        self.location_prepositions = ["to", "in", "at", "from", "near", "around", "about", "for"]
+        self.location_verbs = ["visit", "visiting", "go", "going", "travel", "traveling", 
+                              "come", "coming", "move", "moving", "fly", "flying", 
+                              "drive", "driving", "explore", "exploring", "tour", "touring"]
+        
+        # Words to skip when looking for locations
+        self.skip_words = {
+            "i", "i'm", "i'll", "what's", "tell", "show", "plan", "my", "the", "a", "an",
+            "going", "visit", "trip", "weather", "what", "where", "when", "want", "need",
+            "like", "tell", "about", "there", "here", "this", "that", "these", "those",
+            "me", "you", "we", "they", "it", "is", "are", "was", "were", "be", "been",
+            "have", "has", "had", "do", "does", "did", "will", "would", "should", "could",
+            "can", "may", "might", "must", "shall", "and", "or", "with"
+        }
+        
+        # Intent keywords
+        self.weather_keywords = [
+            "weather", "temperature", "rain", "forecast", "climate",
+            "hot", "cold", "sunny", "cloudy", "humid", "temp", "raining",
+            "snowing", "windy", "storm", "precipitation"
+        ]
+        
+        self.places_keywords = [
+            "visit", "trip", "plan", "attractions", "places", "see",
+            "go", "tour", "travel", "explore", "sightseeing", "destination",
+            "going", "vacation", "holiday", "things", "spots", "sites",
+            "landmarks", "monuments", "museums", "parks"
+        ]
     
     def parse(self, user_input: str) -> Tuple[Optional[str], str]:
         """
@@ -20,93 +41,142 @@ class NLPParser:
         Returns:
             (location, intent) where intent is "Weather", "Places", or "Both"
         """
-        if not self.nlp:
-            return None, "Places"
+        # Extract location
+        location = self._extract_location(user_input)
         
-        # Process the text with spaCy
-        doc = self.nlp(user_input.lower())
-        
-        # Extract location using Named Entity Recognition
-        location = self._extract_location(doc, user_input)
-        
-        # Determine intent based on keywords
-        intent = self._determine_intent(doc)
+        # Determine intent
+        intent = self._determine_intent(user_input)
         
         return location, intent
     
-    def _extract_location(self, doc, original_text: str) -> Optional[str]:
-        """Extract location from spaCy doc using NER."""
-        # Look for GPE (Geopolitical Entity) or LOC (Location) entities
-        locations = []
-        for ent in doc.ents:
-            if ent.label_ in ["GPE", "LOC"]:
-                locations.append(ent.text)
+    def _extract_location(self, text: str) -> Optional[str]:
+        """Extract location from text using regex patterns and heuristics."""
         
-        if locations:
-            # Return the first location found (usually the most relevant)
-            # Capitalize properly for geocoding
-            return locations[0].title()
+        # Strategy 1: Look for patterns like "in <Location>", "to <Location>", etc.
+        # This handles: "weather in Mumbai", "going to Kerala", "visit Delhi"
+        for prep in self.location_prepositions:
+            # Pattern: preposition followed by capitalized word(s)
+            pattern = rf'\b{prep}\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)'
+            match = re.search(pattern, text)
+            if match:
+                location = match.group(1).strip()
+                if self._is_valid_location(location):
+                    return location
+            
+            # Pattern: preposition followed by lowercase word (for all-lowercase input)
+            # This handles: "going to bangalore", "weather in mumbai"
+            pattern_lower = rf'\b{prep}\s+([a-z][a-z]+(?:\s+[a-z]+)*)'
+            match = re.search(pattern_lower, text.lower())
+            if match:
+                raw_location = match.group(1).strip()
+                # Check if the first word is a verb or skip word (e.g. "to visit bangalore")
+                first_word = raw_location.split()[0]
+                if first_word in self.location_verbs or first_word in self.skip_words:
+                    # Strip the first word if there are more words
+                    parts = raw_location.split()
+                    if len(parts) > 1:
+                        raw_location = " ".join(parts[1:])
+                    else:
+                        continue
+                
+                location = raw_location.title()
+                if self._is_valid_location(location):
+                    return location
         
-        # Fallback 1: Look for words after common location prepositions
-        # This handles "going to bangalore", "visiting mumbai", etc.
-        location_prepositions = ["to", "in", "at", "from", "near"]
-        common_verbs = ["travel", "visit", "go", "going", "come", "coming", "move", "moving", "fly", "flying", "drive", "driving"]
-        words = original_text.lower().split()
+        # Strategy 2: Look for patterns like "visit <Location>", "explore <Location>"
+        for verb in self.location_verbs:
+            # Pattern: verb followed by capitalized word(s)
+            pattern = rf'\b{verb}\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)'
+            match = re.search(pattern, text)
+            if match:
+                location = match.group(1).strip()
+                if self._is_valid_location(location):
+                    return location
+            
+            # Pattern: verb followed by lowercase word
+            pattern_lower = rf'\b{verb}\s+([a-z][a-z]+(?:\s+[a-z]+)*)'
+            match = re.search(pattern_lower, text.lower())
+            if match:
+                raw_location = match.group(1).strip()
+                # Check if the first word is a skip word
+                first_word = raw_location.split()[0]
+                if first_word in self.skip_words:
+                    parts = raw_location.split()
+                    if len(parts) > 1:
+                        raw_location = " ".join(parts[1:])
+                    else:
+                        continue
+
+                location = raw_location.title()
+                if self._is_valid_location(location):
+                    return location
         
+        # Strategy 3: Look for capitalized words (proper nouns)
+        # This handles: "What's the weather in Mumbai?"
+        words = text.split()
         for i, word in enumerate(words):
-            if word in location_prepositions and i + 1 < len(words):
-                # Get the next word after the preposition
-                potential_location = words[i + 1]
-                # Remove punctuation
-                potential_location = potential_location.strip('.,!?;:')
-                # Skip if it's a common verb or too short
-                if len(potential_location) > 2 and potential_location not in common_verbs:
-                    return potential_location.title()
+            # Clean punctuation
+            clean_word = re.sub(r'[^\w\s]', '', word)
+            if clean_word and len(clean_word) > 2:
+                # Check if it's capitalized and not a skip word
+                if clean_word[0].isupper() and clean_word.lower() not in self.skip_words:
+                    # Check if it's not at the start of a sentence
+                    if i > 0 or not self._is_sentence_start_word(clean_word):
+                        if self._is_valid_location(clean_word):
+                            return clean_word
         
-        # Fallback 2: Look for capitalized words in original text
-        words = original_text.split()
+        # Strategy 4: Fallback - look for any word that could be a location
+        # This handles fully lowercase queries: "bangalore weather"
+        words = text.lower().split()
         for word in words:
-            # Check if word is capitalized and not a common word
-            if word and word[0].isupper() and len(word) > 2:
-                # Skip common words that might be capitalized
-                skip_words = {"I", "I'm", "I'll", "What's", "Tell", "Show", "Plan", "My", "The", "A", "An"}
-                if word not in skip_words and not word.endswith("'s"):
-                    return word
-        
-        # Fallback 3: Look for any word that might be a location
-        # Check if any word (when capitalized) could be a valid location
-        # This is a last resort for fully lowercase queries like "bangalore"
-        for word in words:
-            word_clean = word.strip('.,!?;:').lower()
-            # Skip very short words and common words
-            if len(word_clean) > 3 and word_clean not in [
-                "going", "visit", "plan", "trip", "weather", "what", "where",
-                "when", "want", "need", "like", "show", "tell", "about"
-            ]:
-                # Return it capitalized - geocoding will validate if it's real
-                return word_clean.title()
+            clean_word = re.sub(r'[^\w\s]', '', word)
+            if len(clean_word) > 2 and clean_word not in self.skip_words:
+                # Skip obvious non-location words
+                if not any(kw in clean_word for kw in self.weather_keywords + self.places_keywords):
+                    return clean_word.title()
         
         return None
     
-    def _determine_intent(self, doc) -> str:
+    def _is_valid_location(self, word: str) -> bool:
+        """Check if a word could be a valid location name."""
+        if not word or len(word) < 2:
+            return False
+        
+        # Remove common punctuation
+        clean = word.strip('.,!?;:')
+        
+        # Skip if it's a skip word
+        if clean.lower() in self.skip_words:
+            return False
+        
+        # Skip if it's a weather or places keyword
+        if clean.lower() in self.weather_keywords or clean.lower() in self.places_keywords:
+            return False
+        
+        # Skip common sentence starters
+        if clean in ["What", "Tell", "Show", "Plan", "How", "Why", "When", "Where"]:
+            return False
+        
+        return True
+    
+    def _is_sentence_start_word(self, word: str) -> bool:
+        """Check if a word is typically used at the start of sentences."""
+        sentence_starters = {
+            "What", "Tell", "Show", "Plan", "How", "Why", "When", "Where",
+            "I", "We", "You", "They", "Can", "Could", "Would", "Should",
+            "Is", "Are", "Do", "Does", "Will", "Please"
+        }
+        return word in sentence_starters
+    
+    def _determine_intent(self, text: str) -> str:
         """Determine user intent based on keywords."""
-        text = doc.text.lower()
+        text_lower = text.lower()
         
-        # Weather keywords
-        weather_keywords = [
-            "weather", "temperature", "rain", "forecast", "climate",
-            "hot", "cold", "sunny", "cloudy", "humid", "temp"
-        ]
+        # Check for weather keywords
+        has_weather = any(keyword in text_lower for keyword in self.weather_keywords)
         
-        # Places keywords
-        places_keywords = [
-            "visit", "trip", "plan", "attractions", "places", "see",
-            "go", "tour", "travel", "explore", "sightseeing", "destination",
-            "going", "vacation", "holiday"
-        ]
-        
-        has_weather = any(keyword in text for keyword in weather_keywords)
-        has_places = any(keyword in text for keyword in places_keywords)
+        # Check for places keywords
+        has_places = any(keyword in text_lower for keyword in self.places_keywords)
         
         if has_weather and has_places:
             return "Both"
@@ -115,5 +185,5 @@ class NLPParser:
         elif has_places:
             return "Places"
         else:
+            # Default to Places if no specific keywords found
             return "Places"
-
